@@ -222,7 +222,7 @@ public class ICQExport {
 				+ nick + " (UIN " + UIN + ")</h1>");
 
 		bw.write("<br>");
-		for (Message msg : msgs.get(UIN).descendingSet()) {
+		for (Message msg : msgs.getOrDefault(UIN, new TreeSet<Message>()).descendingSet()) {
 			String text = escapeHtml(msg.text);
 			text = text.replaceAll("\r\n", "<br>");
 			if (msg.received) {
