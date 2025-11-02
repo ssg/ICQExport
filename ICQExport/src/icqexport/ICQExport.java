@@ -19,28 +19,25 @@
 
 package icqexport;
 
+import com.mindprod.ledatastream.LERandomAccessFile;
 import java.awt.Desktop;
 import java.io.BufferedWriter;
 import java.io.EOFException;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-
+import java.util.TreeMap;
+import java.util.TreeSet;
 import javax.swing.JFileChooser;
 import javax.swing.filechooser.FileNameExtensionFilter;
-
-import com.google.common.base.Charsets;
-import com.google.common.base.Joiner;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.TreeMultimap;
-import com.google.common.html.HtmlEscapers;
-import com.mindprod.ledatastream.LERandomAccessFile;
 
 /**
  * ICQExport - exports ICQ database files (prior to version 2003b) to HTML
@@ -109,10 +106,9 @@ public class ICQExport {
 
 		LERandomAccessFile datIn = new LERandomAccessFile(datFile, "r");
 		byte[] sig = new byte[15];
-		Map<String, Map<String, String>> userData = Maps
-				.<String, Map<String, String>> newHashMap();
+		Map<String, Map<String, String>> userData = new HashMap<>();
 
-		TreeMultimap<String, Message> msgs = TreeMultimap.create();
+		Map<String, TreeSet<Message>> msgs = new TreeMap<>();
 
 		try {
 			while (true) {
@@ -148,7 +144,7 @@ public class ICQExport {
 						datIn.readShort();
 						long ts = datIn.readInt();
 						Date tsDate = new java.util.Date(ts * 1000L);
-						msgs.put(uin + "", new Message(msgText, tsDate,
+						msgs.computeIfAbsent(uin + "", k -> new TreeSet<>()).add(new Message(msgText, tsDate,
 								sentOrReceived == 0));
 					} else if (entryType == (byte) 0xa0) {
 						int subType = datIn.readShort();
@@ -160,7 +156,7 @@ public class ICQExport {
 						datIn.readShort();
 						long ts = datIn.readInt();
 						Date tsDate = new java.util.Date(ts * 1000L);
-						msgs.put(uin + "", new Message(url, tsDate,
+						msgs.computeIfAbsent(uin + "", k -> new TreeSet<>()).add(new Message(url, tsDate,
 								sentOrReceived == 0));
 					} else if (entryType == (byte) 0xE5) {
 						try {
@@ -198,16 +194,21 @@ public class ICQExport {
 		System.out.println("Done!");
 
 		if (Desktop.isDesktopSupported()) {
-
-			Desktop.getDesktop().browse(indexFile.toURI());
-
+			try {
+				Desktop.getDesktop().browse(indexFile.toURI());
+			} catch (Exception e) {
+				System.err.println("Could not open browser: " + e.getMessage());
+				System.out.println("Please open: " + indexFile.getAbsolutePath());
+			}
+		} else {
+			System.out.println("Please open: " + indexFile.getAbsolutePath());
 		}
 
 	}
 
 	private static void writeMessageFile(String UIN,
 			Map<String, Map<String, String>> userData,
-			TreeMultimap<String, Message> msgs) throws IOException {
+			Map<String, TreeSet<Message>> msgs) throws IOException {
 		File outDir = new File("html");
 		outDir.mkdirs();
 		File indexFile = new File(outDir, UIN + ".html");
@@ -222,7 +223,7 @@ public class ICQExport {
 
 		bw.write("<br>");
 		for (Message msg : msgs.get(UIN).descendingSet()) {
-			String text = HtmlEscapers.htmlEscaper().escape(msg.text);
+			String text = escapeHtml(msg.text);
 			text = text.replaceAll("\r\n", "<br>");
 			if (msg.received) {
 				bw.write("<div style='color:#000080'>[" + msg.timestamp
@@ -253,7 +254,7 @@ public class ICQExport {
 
 	private static File writeIndexFile(
 			Map<String, Map<String, String>> userData,
-			TreeMultimap<String, Message> msgs) throws IOException {
+			Map<String, TreeSet<Message>> msgs) throws IOException {
 		File outDir = new File("html");
 		outDir.mkdirs();
 		File indexFile = new File(outDir, "index.html");
@@ -266,7 +267,7 @@ public class ICQExport {
 				String lastOnlineStr = "Unknown";
 				if (props.containsKey("LastOnlineTime")) {
 					Date lastOnline = new Date(
-							new Long(props.get("LastOnlineTime")).longValue() * 1000L);
+							Long.parseLong(props.get("LastOnlineTime")) * 1000L);
 					lastOnlineStr = lastOnline.toString();
 				}
 				bw.write("<tr><td><a href=\"" + UIN + ".html\">" + UIN
@@ -289,7 +290,7 @@ public class ICQExport {
 
 	private static Map<String, String> readProperties(LERandomAccessFile datIn,
 			long startPos) throws IOException {
-		Map<String, String> props = Maps.newHashMap();
+		Map<String, String> props = new HashMap<>();
 		datIn.seek(startPos + 0x2c);
 		int numberOfWavEntries = datIn.readInt();
 		for (int i = 0; i < numberOfWavEntries; i++) {
@@ -335,11 +336,11 @@ public class ICQExport {
 					byte type = datIn.readByte();
 					switch (type) {
 					case 0x6b:
-						List<String> subProps = Lists.newArrayList();
+						List<String> subProps = new ArrayList<>();
 						for (int x = 0; x < subListPropCount; x++) {
 							subProps.add(readASCII(datIn));
 						}
-						value = Joiner.on(" ").join(subProps);
+						value = String.join(" ", subProps);
 						break;
 					case 0x6e:
 						throw new UnsupportedOperationException();
@@ -371,9 +372,17 @@ public class ICQExport {
 			return "";
 		byte[] msg = new byte[length - 1];
 		datIn.read(msg);
-		String msgText = new String(msg, Charsets.ISO_8859_1);
+		String msgText = new String(msg, StandardCharsets.ISO_8859_1);
 		datIn.skipBytes(1); // skip 0x00 separator
 		return msgText;
+	}
+
+	private static String escapeHtml(String text) {
+		return text.replace("&", "&amp;")
+				   .replace("<", "&lt;")
+				   .replace(">", "&gt;")
+				   .replace("\"", "&quot;")
+				   .replace("'", "&#39;");
 	}
 
 }

@@ -1,0 +1,9 @@
+{
+    "java.project.sourcePaths": [
+        "ICQExport/src"
+    ],
+    "java.project.outputPath": "ICQExport/bin",
+    "java.project.referencedLibraries": [
+        "ICQExport/lib/**/*.jar"
+    ]
+}
